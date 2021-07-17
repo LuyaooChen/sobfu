@@ -1,54 +1,62 @@
-#include <sobfu/sob_fusion.hpp>
+#include <sobfu/sob_fusion2.hpp>
 
-SobFusion::SobFusion(const Params &params) : frame_counter_(0), params(params) {
+// #include <opencv2/opencv.hpp>
+
+SobFusion2::SobFusion2(const Params &params) : frame_counter_(0), params(params) {
     int cols = params.cols;
     int rows = params.rows;
 
-    dists_.create(rows, cols);
+    // dists_.create(rows, cols);
+    dists_vec_.resize(params.n_cams);
+    curr_.depths.resize(params.n_cams);
+    // curr_.normals_pyr.resize(1);
 
-    curr_.depth_pyr.resize(1);
-    curr_.normals_pyr.resize(1);
+    // prev_.depth_pyr.resize(1);
+    // prev_.normals_pyr.resize(1);
 
-    prev_.depth_pyr.resize(1);
-    prev_.normals_pyr.resize(1);
+    // curr_.points_pyr.resize(1);
+    // prev_.points_pyr.resize(1);
 
-    curr_.points_pyr.resize(1);
-    prev_.points_pyr.resize(1);
+    for (int i = 0; i < params.n_cams; i++)
+    // for (int i = 0; i < 4; i++)
+    {
+        dists_vec_[i].create(rows, cols);
+        curr_.depths[i].create(rows, cols);
+    }
+    // curr_.depth_pyr[0].create(rows, cols);
+    // curr_.normals_pyr[0].create(rows, cols);
 
-    curr_.depth_pyr[0].create(rows, cols);
-    curr_.normals_pyr[0].create(rows, cols);
+    // prev_.depth_pyr[0].create(rows, cols);
+    // prev_.normals_pyr[0].create(rows, cols);
 
-    prev_.depth_pyr[0].create(rows, cols);
-    prev_.normals_pyr[0].create(rows, cols);
+    // curr_.points_pyr[0].create(rows, cols);
+    // prev_.points_pyr[0].create(rows, cols);
 
-    curr_.points_pyr[0].create(rows, cols);
-    prev_.points_pyr[0].create(rows, cols);
+    // depths_.create(rows, cols);
+    // normals_.create(rows, cols);
+    // points_.create(rows, cols);
 
-    depths_.create(rows, cols);
-    normals_.create(rows, cols);
-    points_.create(rows, cols);
-
-    poses_.clear();
-    poses_.reserve(4096);
-    poses_.push_back(cv::Affine3f::Identity());
+    // poses_.clear();
+    // poses_.reserve(4096);
+    // poses_.push_back(cv::Affine3f::Identity());
 
     mc = cv::Ptr<kfusion::cuda::MarchingCubes>(new kfusion::cuda::MarchingCubes());
     mc->setPose(params.volume_pose);
 }
 
-SobFusion::~SobFusion() = default;
+SobFusion2::~SobFusion2() = default;
 
-Params &SobFusion::getParams() { return params; }
+Params &SobFusion2::getParams() { return params; }
 
-pcl::PolygonMesh::Ptr SobFusion::get_phi_global_mesh() { return get_mesh(phi_global); }
+pcl::PolygonMesh::Ptr SobFusion2::get_phi_global_mesh() { return get_mesh(phi_global); }
 
-pcl::PolygonMesh::Ptr SobFusion::get_phi_global_psi_inv_mesh() { return get_mesh(phi_global_psi_inv); }
+pcl::PolygonMesh::Ptr SobFusion2::get_phi_global_psi_inv_mesh() { return get_mesh(phi_global_psi_inv); }
 
-pcl::PolygonMesh::Ptr SobFusion::get_phi_n_mesh() { return get_mesh(phi_n); }
+pcl::PolygonMesh::Ptr SobFusion2::get_phi_n_mesh() { return get_mesh(phi_n); }
 
-pcl::PolygonMesh::Ptr SobFusion::get_phi_n_psi_mesh() { return get_mesh(phi_n_psi); }
+pcl::PolygonMesh::Ptr SobFusion2::get_phi_n_psi_mesh() { return get_mesh(phi_n_psi); }
 
-std::shared_ptr<sobfu::cuda::DeformationField> SobFusion::getDeformationField() { return this->psi; }
+std::shared_ptr<sobfu::cuda::DeformationField> SobFusion2::getDeformationField() { return this->psi; }
 
 /* PIPELINE
  *
@@ -68,27 +76,38 @@ std::shared_ptr<sobfu::cuda::DeformationField> SobFusion::getDeformationField() 
  *
  */
 
-bool SobFusion::operator()(const kfusion::cuda::Depth &depth, const kfusion::cuda::Image & /*image*/) {
+// bool SobFusion::operator()(const kfusion::cuda::Depth &depth, const kfusion::cuda::Image & /*image*/) {
+bool SobFusion2::operator()(const std::vector<kfusion::cuda::Depth> &depths) {
     std::cout << "--- FRAME NO. " << frame_counter_ << " ---" << std::endl;
 
-    /*
-     *  bilateral filter 双边滤波去噪
-     */
+    for (int i = 0; i < params.n_cams; i++)
+    {
+        /*
+         *  bilateral filter 双边滤波去噪
+         */
 
-    kfusion::cuda::depthBilateralFilter(depth, curr_.depth_pyr[0], params.bilateral_kernel_size,
-                                        params.bilateral_sigma_spatial, params.bilateral_sigma_depth);
+        kfusion::cuda::depthBilateralFilter(depths[i], curr_.depths[i], params.bilateral_kernel_size,
+                                            params.bilateral_sigma_spatial, params.bilateral_sigma_depth);
 
-    /*
-     * depth truncation 截断深度
-     */
+        /*
+         * depth truncation 截断深度
+         */
 
-    kfusion::cuda::depthTruncation(curr_.depth_pyr[0], params.icp_truncate_depth_dist);
+        kfusion::cuda::depthTruncation(curr_.depths[i], params.icp_truncate_depth_dist);
 
-    /*
-     *  compute distances using depth map 计算距离，不太理解，类似于计算点云坐标
-     */
+        /*
+         *  compute distances using depth map 计算距离，不太理解，类似于计算点云坐标
+         */
 
-    kfusion::cuda::computeDists(curr_.depth_pyr[0], dists_, params.intr);
+        kfusion::cuda::computeDists(curr_.depths[i], dists_vec_[i], params.intrs[i]);
+        
+        /* visualization */
+        // cv::Mat display_t(720,1280,CV_32F);
+        // dists_vec_[i].download(display_t.data, display_t.step);
+        // display_t.convertTo(display_t, CV_8U, 255.0/3);
+        // cv::imshow("dists",display_t);
+        // cv::waitKey();
+    }
 
     if (frame_counter_ == 0) {
         /*
@@ -96,7 +115,14 @@ bool SobFusion::operator()(const kfusion::cuda::Depth &depth, const kfusion::cud
          */
 
         phi_global = cv::Ptr<kfusion::cuda::TsdfVolume>(new kfusion::cuda::TsdfVolume(params));
-        phi_global->integrate(dists_, poses_.back(), params.intr);
+
+        for (int i = 0; i < params.n_cams; i++)
+        {
+            phi_global->integrate(dists_vec_[i], params.cam_poses[i], params.intrs[i]);
+            // std::cout<<params.cam_poses[i].matrix<<std::endl;
+            // std::cout<<"([f = " << params.intrs[i].fx << ", " << params.intrs[i].fy << "] [cp = " << params.intrs[i].cx << ", " << params.intrs[i].cy << "])"<<std::endl;
+        }
+        
 
         /*
          * INITIALISATION OF PHI_GLOBAL(PSI_INV), PHI_N, AND PHI_N(PSI)
@@ -130,7 +156,8 @@ bool SobFusion::operator()(const kfusion::cuda::Depth &depth, const kfusion::cud
      */
 
     phi_n->clear();
-    this->phi_n->integrate(dists_, poses_.back(), params.intr);
+    for (int i = 0; i < params.n_cams; i++)
+        phi_n->integrate(dists_vec_[i], params.cam_poses[i], params.intrs[i]);
 
     /*
      * ESTIMATION OF DEFORMATION FIELD AND SURFACE FUSION
@@ -148,7 +175,7 @@ bool SobFusion::operator()(const kfusion::cuda::Depth &depth, const kfusion::cud
     return ++frame_counter_, true;
 }
 
-pcl::PolygonMesh::Ptr SobFusion::get_mesh(cv::Ptr<kfusion::cuda::TsdfVolume> vol) {
+pcl::PolygonMesh::Ptr SobFusion2::get_mesh(cv::Ptr<kfusion::cuda::TsdfVolume> vol) {
     kfusion::device::DeviceArray<pcl::PointXYZ> vertices_buffer_device;
     kfusion::device::DeviceArray<pcl::Normal> normals_buffer_device;
 
@@ -161,7 +188,7 @@ pcl::PolygonMesh::Ptr SobFusion::get_mesh(cv::Ptr<kfusion::cuda::TsdfVolume> vol
     return mesh;
 }
 
-pcl::PolygonMesh::Ptr SobFusion::convert_to_mesh(const kfusion::cuda::DeviceArray<pcl::PointXYZ> &triangles) {
+pcl::PolygonMesh::Ptr SobFusion2::convert_to_mesh(const kfusion::cuda::DeviceArray<pcl::PointXYZ> &triangles) {
     if (triangles.empty()) {
         return pcl::PolygonMesh::Ptr(new pcl::PolygonMesh());
     }

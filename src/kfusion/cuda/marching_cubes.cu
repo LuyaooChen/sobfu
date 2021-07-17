@@ -97,6 +97,7 @@ __kf_device__ void kfusion::device::OccupiedVoxels::operator()() const {
         ;
         if (x + 1 < volume.dims.x && y + 1 < volume.dims.y) {
             float field[8];
+__syncthreads();
             int cubeindex = computeCubeIndex(x, y, z, field);
 
             // read number of vertices from texture

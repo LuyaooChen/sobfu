@@ -5,14 +5,22 @@
 
 /* sobfu parameters */
 struct Params {
-    int cols = 640;
-    int rows = 480; /* no. of rows and columns in the frames */
+    // int cols = 640;
+    // int rows = 480; /* no. of rows and columns in the frames */
+    int cols = 1280;
+    int rows = 720;
 
     cv::Vec3i volume_dims; /* volume dimensions in voxels */
     cv::Vec3f volume_size; /* volume size in metres */
 
     cv::Affine3f volume_pose;
     kfusion::Intr intr; /* camera intrinsics */
+
+    /* 用于多相机 */
+    int n_cams = 4;
+    std::vector<cv::Affine3f> cam_poses;
+    std::vector<kfusion::Intr> intrs; 
+    ///////
 
     float icp_truncate_depth_dist; /* depth truncation distance */
 

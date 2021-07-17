@@ -1,16 +1,18 @@
 /* sobfu includes a*/
-#include <sobfu/sob_fusion.hpp>
+#include <sobfu/sob_fusion2.hpp>
 
 /* boost includes */
 #include <boost/program_options.hpp>
 
 /* opencv includes */
+#include <opencv2/core.hpp>
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
 
 /* pcl includes */
 #include <pcl/io/pcd_io.h>
 #include <pcl/io/vtk_io.h>
+#include <pcl/io/ply_io.h>
 #include <pcl/visualization/pcl_visualizer.h>
 
 /* sys headers */
@@ -26,6 +28,15 @@
 #include <vtkRenderWindow.h>
 #include <vtkSmartPointer.h>
 #include <vtkXMLImageDataWriter.h>
+
+static std::string int2str(const int i)
+{
+    std::stringstream ss;
+    ss<<i;
+    std::string ret;
+    ss>>ret;
+    return ret;
+}
 
 struct SobFuApp {
     SobFuApp(std::string file_path, std::string params_path, bool logger, bool visualizer, bool visualizer_detailed,
@@ -43,12 +54,21 @@ struct SobFuApp {
          */
 
         Params params;
+        n_cams_ = params.n_cams;
+        params.rows=720;
+        params.cols=1280;
+        // 为vector分配空间
+        params.cam_poses.resize(params.n_cams);
+        params.intrs.resize(params.n_cams);
 
         if (verbose_) {
             params.verbosity = 1;
         } else if (vverbose_) {
             params.verbosity = 2;
         }
+
+        //从ymal文件中读取相机外参
+        load_camera_param(params);
 
         /*
          * declare parameters to read from .ini
@@ -77,7 +97,34 @@ struct SobFuApp {
          * initialise sobolevfusion
          */
 
-        sobfu = std::make_shared<SobFusion>(params);
+        sobfu = std::make_shared<SobFusion2>(params);
+
+        depth_device_vec_.resize(n_cams_);
+    }
+
+    void load_camera_param(Params& params)
+    {
+        cv::FileStorage freader;
+        for (int i = 0; i < n_cams_; i++) 
+        {
+            std::string extri_file_path = "params/cam_param_" + int2str(i) + ".yaml";
+            cv::Mat pose_t;
+            if (freader.open(extri_file_path, cv::FileStorage::READ))
+            {
+                freader["fx"] >> params.intrs[i].fx;
+                freader["fy"] >> params.intrs[i].fy;
+                freader["cx"] >> params.intrs[i].cx;
+                freader["cy"] >> params.intrs[i].cy;
+
+                freader["transformMat"] >> pose_t;
+                for(int m=0; m<4; m++)
+                    for(int n=0; n<4; n++)
+                        params.cam_poses[i].matrix(m,n) = pose_t.at<double>(m,n);
+            }
+            else
+                std::cout << "read " + extri_file_path + " failed!" << std::endl;
+            freader.release();
+        }
     }
 
     /*
@@ -114,11 +161,10 @@ struct SobFuApp {
         /*
          * camera
          */
-
-        desc.add_options()("INTR_FX", boost::program_options::value<float>(&params.intr.fx), "focal length x");
-        desc.add_options()("INTR_FY", boost::program_options::value<float>(&params.intr.fy), "focal length y");
-        desc.add_options()("INTR_CX", boost::program_options::value<float>(&params.intr.cx), "principal point x");
-        desc.add_options()("INTR_CY", boost::program_options::value<float>(&params.intr.cy), "principal point y");
+        // desc.add_options()("INTR_FX", boost::program_options::value<float>(&params.intr.fx), "focal length x");
+        // desc.add_options()("INTR_FY", boost::program_options::value<float>(&params.intr.fy), "focal length y");
+        // desc.add_options()("INTR_CX", boost::program_options::value<float>(&params.intr.cx), "principal point x");
+        // desc.add_options()("INTR_CY", boost::program_options::value<float>(&params.intr.cy), "principal point y");
 
         desc.add_options()("TRUNC_DEPTH", boost::program_options::value<float>(&params.icp_truncate_depth_dist),
                            "depth map truncation distance (metres)");
@@ -174,7 +220,9 @@ struct SobFuApp {
      * load colour and depth images
      */
 
-    void load_files(std::vector<cv::String> *depths, std::vector<cv::String> *images, std::vector<cv::String> *masks) {
+    void load_files(std::vector<std::vector<cv::String>> &depths, 
+                    std::vector<std::vector<cv::String>> &images, 
+                    std::vector<std::vector<cv::String>> &masks) {
         if (!boost::filesystem::exists(file_path_)) {
             std::cerr << "error: directory '" << file_path_ << "' does not exist. exiting" << std::endl;
             exit(EXIT_FAILURE);
@@ -185,15 +233,18 @@ struct SobFuApp {
             exit(EXIT_FAILURE);
         }
 
-        cv::glob(file_path_ + "/depth", *depths);
-        cv::glob(file_path_ + "/color", *images);
+        for(int i=0; i<n_cams_; i++)
+        {
+            cv::glob(file_path_ + "/depth/"+int2str(i), depths[i]);
+            // cv::glob(file_path_ + "/color/"+int2str(i), images[i]);
 
-        std::sort((*depths).begin(), (*depths).end());
-        std::sort((*images).begin(), (*images).end());
+            std::sort(depths[i].begin(), depths[i].end());
+            // std::sort(images[i].begin(), images[i].end());
 
-        if (boost::filesystem::exists(file_path_ + "/omask")) {
-            cv::glob(file_path_ + "/omask", *masks);
-            std::sort((*masks).begin(), (*masks).end());
+            if (boost::filesystem::exists(file_path_ + "/omask")) {
+                cv::glob(file_path_ + "/omask/"+int2str(i), masks[i]);
+                std::sort(masks[i].begin(), masks[i].end());
+            }
         }
     }
 
@@ -241,15 +292,16 @@ struct SobFuApp {
         std::string frameNum = ss.str();
 
         /* save to vtk */
-        pcl::io::saveVTKFile(out_path_ + "/" + name + "_" + frameNum + ".vtk", *mesh);
-        std::cout << "saved " + name + "_" + frameNum + ".vtk" << std::endl;
+        // pcl::io::saveVTKFile(out_path_ + "/" + name + "_" + frameNum + ".vtk", *mesh);
+        pcl::io::savePLYFileBinary(out_path_ + "/" + name + "_" + frameNum + ".ply", *mesh);
+        std::cout << "saved " + name + "_" + frameNum + ".ply" << std::endl;
     }
 
     /*
      * save 3d deformation field in .vtk format
      */
 
-    void save_field(std::shared_ptr<SobFusion> sobfu, int i) {
+    void save_field(std::shared_ptr<SobFusion2> sobfu, int i) {
         /* get parameters */
         Params params = sobfu->getParams();
 
@@ -287,10 +339,11 @@ struct SobFuApp {
         sobfu = sobfu;
 
         /* images */
-        cv::Mat depth, image, mask;
-        std::vector<cv::String> depths, images, masks;
+        // cv::Mat depth, image, mask;
+        std::vector<cv::Mat> depths(n_cams_), masks(n_cams_);
+        std::vector<std::vector<cv::String>> depths_path(n_cams_), masks_path(n_cams_), images_path(n_cams_);
 
-        load_files(&depths, &images, &masks);
+        load_files(depths_path, images_path, masks_path);    //彩色图暂时没有加载
 
         /* output */
         create_output_directory();
@@ -298,40 +351,48 @@ struct SobFuApp {
         /* pipeline */
         double time_ms = 0;
         bool has_image = false;
-        bool has_masks = masks.size() > 0;
+        bool has_masks = masks_path[0].size() > 0;
 
-        int v1(0);  //viewpoint
+        int v1(0);  // viewpoint
         int v2(0);
 
         int v3(0);
         int v4(0);
         int v5(0);
 
-        for (size_t i = 0; i < depths.size(); ++i) {
-            depth = cv::imread(depths[i], CV_LOAD_IMAGE_ANYDEPTH);
+        for (size_t i = 0; i < depths_path[0].size(); ++i) {
+            for(int j=0; j<n_cams_; j++)
+                depths[j] = cv::imread(depths_path[j][i], CV_LOAD_IMAGE_ANYDEPTH);
             // image = cv::imread(images[i], CV_LOAD_IMAGE_COLOR);
 
-            cv::Mat depth_masked = cv::Mat::zeros(depth.size(), depth.type());
+            std::vector<cv::Mat> depth_masked_vec(n_cams_);// = cv::Mat::zeros(depth.size(), depth.type());
             if (has_masks) {
-                mask = cv::imread(masks[i], CV_8U);
-                depth.copyTo(depth_masked, mask);
+                for(int j=0; j<n_cams_; j++)
+                {
+                    masks[j] = cv::imread(masks_path[j][i], CV_8U);
+                    depth_masked_vec[j] = cv::Mat::zeros(depths[j].size(), depths[j].type());
+                    depths[j].copyTo(depth_masked_vec[j], masks[j]);
+                }                
             }
 
-            if (/*!image.data ||*/ !depth.data) {
+            if (/*!image.data ||*/ !depths[0].data) {
                 std::cerr << "error: image could not be read; check for improper"
                           << " permissions or invalid formats. exiting..." << std::endl;
                 exit(EXIT_FAILURE);
             }
 
-            if (has_masks) {
-                depth_device_.upload(depth_masked.data, depth_masked.step, depth_masked.rows, depth_masked.cols);
-            } else {
-                depth_device_.upload(depth.data, depth.step, depth.rows, depth.cols);
+            for(int j=0; j<n_cams_; j++)
+            {
+                if (has_masks)
+                    depth_device_vec_[j].upload(depth_masked_vec[j].data, depth_masked_vec[j].step, depth_masked_vec[j].rows, depth_masked_vec[j].cols);
+                else
+                    depth_device_vec_[j].upload(depths[j].data, depths[j].step, depths[j].rows, depths[j].cols);
+                
             }
 
             {
                 kfusion::SampledScopeTime fps(time_ms);
-                has_image = (*(sobfu))(depth_device_);  //sobfu主流程
+                has_image = (*(sobfu)) (depth_device_vec_);  // sobfu主流程
             }
 
             /* get meshes */
@@ -512,13 +573,16 @@ struct SobFuApp {
     /*
      * 成员变量
      */
-    kfusion::cuda::Depth depth_device_;
+    // kfusion::cuda::Depth depth_device_;
+    std::vector<kfusion::cuda::Depth> depth_device_vec_;
 
-    std::shared_ptr<SobFusion> sobfu;
+    std::shared_ptr<SobFusion2> sobfu;
     std::shared_ptr<pcl::visualization::PCLVisualizer> viewer;
 
     bool exit_, logger_, visualizer_, visualizer_detailed_, off_screen_, verbose_, vverbose_;
     std::string file_path_, params_path_, out_path_, out_screenshot_path_;
+
+    int n_cams_;
 };
 
 /*

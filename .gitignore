@@ -1,5 +1,7 @@
 # Created by https://www.gitignore.io/api/vim,osx,c++
 /data
+/data2
+/.vscode
 ### C++ ###
 # Prerequisites
 *.d

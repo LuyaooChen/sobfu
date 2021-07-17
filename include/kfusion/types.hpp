@@ -94,6 +94,13 @@ struct Frame {
     std::vector<Cloud> points_pyr;
     std::vector<Normals> normals_pyr;
 };
+
+struct Frame2
+{
+    //用于多个相机的输入的一组深度图
+    std::vector<Depth> depths;
+};
+
 }  // namespace cuda
 
 inline float deg2rad(float alpha) { return alpha * 0.017453293f; }
