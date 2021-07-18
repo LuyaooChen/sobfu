@@ -54,22 +54,12 @@ struct SobFuApp {
          */
 
         Params params;
-        n_cams_ = params.n_cams;
-        params.rows=720;
-        params.cols=1280;
-        // 为vector分配空间
-        params.cam_poses.resize(params.n_cams);
-        params.intrs.resize(params.n_cams);
 
         if (verbose_) {
             params.verbosity = 1;
         } else if (vverbose_) {
             params.verbosity = 2;
         }
-
-        //从ymal文件中读取相机外参
-        load_camera_param(params);
-
         /*
          * declare parameters to read from .ini
          */
@@ -83,6 +73,13 @@ struct SobFuApp {
 
         boost::program_options::variables_map vm;
         read_parameters(desc, vm);
+
+        n_cams_=params.n_cams;
+        // 为vector分配空间
+        params.cam_poses.resize(n_cams_);
+        params.intrs.resize(n_cams_);
+        //从ymal文件中读取相机外参
+        load_camera_param(params);
 
         /*
          * parse parameters stored in units of voxels
@@ -105,7 +102,7 @@ struct SobFuApp {
     void load_camera_param(Params& params)
     {
         cv::FileStorage freader;
-        for (int i = 0; i < n_cams_; i++) 
+        for (int i = 0; i < params.n_cams; i++) 
         {
             std::string extri_file_path = "params/cam_param_" + int2str(i) + ".yaml";
             cv::Mat pose_t;
@@ -161,6 +158,9 @@ struct SobFuApp {
         /*
          * camera
          */
+        desc.add_options()("N_CAMS", boost::program_options::value<int>(&params.n_cams),"no. of cameras");
+        desc.add_options()("ROWS", boost::program_options::value<int>(&params.rows),"rows of image");
+        desc.add_options()("COLS", boost::program_options::value<int>(&params.cols),"cols of iamge");
         // desc.add_options()("INTR_FX", boost::program_options::value<float>(&params.intr.fx), "focal length x");
         // desc.add_options()("INTR_FY", boost::program_options::value<float>(&params.intr.fy), "focal length y");
         // desc.add_options()("INTR_CX", boost::program_options::value<float>(&params.intr.cx), "principal point x");
@@ -232,12 +232,12 @@ struct SobFuApp {
             std::cerr << "error: source directory should contain 'color' and 'depth' folders. exiting..." << std::endl;
             exit(EXIT_FAILURE);
         }
-
+std::cout<<"[demo2.cpp line 235] n_cams_:"<<n_cams_<<std::endl;
         for(int i=0; i<n_cams_; i++)
         {
             cv::glob(file_path_ + "/depth/"+int2str(i), depths[i]);
             // cv::glob(file_path_ + "/color/"+int2str(i), images[i]);
-
+std::cout<<"[demo2.cpp line 240] file path size:"<<depths[i].size()<<std::endl;
             std::sort(depths[i].begin(), depths[i].end());
             // std::sort(images[i].begin(), images[i].end());
 
@@ -246,6 +246,7 @@ struct SobFuApp {
                 std::sort(masks[i].begin(), masks[i].end());
             }
         }
+std::cout<<"[demo2.cpp: 249] load_files end"<<std::endl;
     }
 
     /*
@@ -342,8 +343,13 @@ struct SobFuApp {
         // cv::Mat depth, image, mask;
         std::vector<cv::Mat> depths(n_cams_), masks(n_cams_);
         std::vector<std::vector<cv::String>> depths_path(n_cams_), masks_path(n_cams_), images_path(n_cams_);
-
+std::cout<<"[demo2.cpp line345] load_files"<<std::endl;
         load_files(depths_path, images_path, masks_path);    //彩色图暂时没有加载
+for(int i=0;i<n_cams_;i++)
+{
+    for(int j=0;j<depths_path[i].size();j++)
+        std::cout<<depths_path[i][j]<<std::ends;
+}
 
         /* output */
         create_output_directory();
@@ -677,7 +683,7 @@ int main(int argc, char *argv[]) {
     }
 
     SobFuApp app(file_path, params_path, logger, visualizer, visualizer_detailed, verbose, vverbose);
-
+std::cout<<"[demo2.cpp line682] app.execuete()"<<std::endl;
     /* execute */
     app.execute();
 

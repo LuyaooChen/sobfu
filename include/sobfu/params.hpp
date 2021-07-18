@@ -17,7 +17,7 @@ struct Params {
     kfusion::Intr intr; /* camera intrinsics */
 
     /* 用于多相机 */
-    int n_cams = 4;
+    int n_cams = 1;
     std::vector<cv::Affine3f> cam_poses;
     std::vector<kfusion::Intr> intrs; 
     ///////

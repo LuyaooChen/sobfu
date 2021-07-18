@@ -82,7 +82,7 @@ __kf_device__ void kfusion::device::OccupiedVoxels::operator()() const {
     int x = threadIdx.x + blockIdx.x * CTA_SIZE_X;
     int y = threadIdx.y + blockIdx.y * CTA_SIZE_Y;
 
-    if (__all_sync(FULL_MASK, x >= volume.dims.x) || __all_sync(FULL_MASK, y >= volume.dims.y)) {
+    if (__all_sync(__activemask (), x >= volume.dims.x) || __all_sync(__activemask (), y >= volume.dims.y)) {
         return;
     }
 
@@ -97,14 +97,14 @@ __kf_device__ void kfusion::device::OccupiedVoxels::operator()() const {
         ;
         if (x + 1 < volume.dims.x && y + 1 < volume.dims.y) {
             float field[8];
-__syncthreads();
+// __syncthreads();
             int cubeindex = computeCubeIndex(x, y, z, field);
 
             // read number of vertices from texture
             numVerts = (cubeindex == 0 || cubeindex == 255) ? 0 : tex1Dfetch(numVertsTex, cubeindex);
         }
 
-        int total = __popc(__ballot_sync(FULL_MASK, numVerts > 0));
+        int total = __popc(__ballot_sync(__activemask (), numVerts > 0));
 
         if (total == 0)
             continue;
@@ -115,7 +115,7 @@ __syncthreads();
         }
         int old_global_voxels_count = warps_buffer[warp_id];
 
-        int offs = Warp::binaryExclScan(__ballot_sync(FULL_MASK, numVerts > 0));
+        int offs = Warp::binaryExclScan(__ballot_sync(__activemask (), numVerts > 0));
 
         if (old_global_voxels_count + offs < max_size && numVerts > 0) {
             voxels_indices[old_global_voxels_count + offs]  = volume.dims.y * volume.dims.x * z + volume.dims.x * y + x;
