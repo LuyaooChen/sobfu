@@ -85,18 +85,37 @@ struct TsdfIntegrator {
                 continue;
             }
 
-            /* get the psdf value */
-            float psdf = Dp - vc_cam.z;
-            /* get the weight */
-            float weight = (psdf > -volume.eta) ? 1.f : 0.f;
+            float sdf = Dp - __fsqrt_rn(dot(vc_cam, vc_cam)); //Dp - norm(v)
 
-            if (psdf >= volume.trunc_dist) {
-                *vptr = make_float2(1.f, weight);
-            } else if (psdf <= -volume.trunc_dist) {
-                *vptr = make_float2(-1.f, weight);
-            } else {
-                *vptr = make_float2(__fdividef(psdf, volume.trunc_dist), weight);
+            if (sdf >= -volume.trunc_dist)
+            {
+                float tsdf = fmin(1.f, sdf / volume.trunc_dist);
+
+                //read and unpack
+                int weight_prev=vptr->y;
+                float tsdf_prev=vptr->x;// = unpack_tsdf (gmem::LdCs(vptr), weight_prev);
+
+
+                float tsdf_new = __fdividef(__fmaf_rn(tsdf_prev, weight_prev, tsdf), weight_prev + 1);
+                int weight_new = min (weight_prev + 1, (int)volume.max_weight);
+
+                //pack and write
+                // gmem::StCs(pack_tsdf (tsdf_new, weight_new), vptr);
+                *vptr = make_float2(tsdf_new, weight_new);
             }
+
+            /* get the psdf value */
+            // float psdf = Dp - vc_cam.z;
+            // /* get the weight */
+            // float weight = (psdf > -volume.eta) ? 1.f : 0.f;
+
+            // if (psdf >= volume.trunc_dist) {
+            //     *vptr = make_float2(1.f, weight);
+            // } else if (psdf <= -volume.trunc_dist) {
+            //     *vptr = make_float2(-1.f, weight);
+            // } else {
+            //     *vptr = make_float2(__fdividef(psdf, volume.trunc_dist), weight);
+            // }
         }
     }
 

@@ -345,11 +345,6 @@ std::cout<<"[demo2.cpp: 249] load_files end"<<std::endl;
         std::vector<std::vector<cv::String>> depths_path(n_cams_), masks_path(n_cams_), images_path(n_cams_);
 std::cout<<"[demo2.cpp line345] load_files"<<std::endl;
         load_files(depths_path, images_path, masks_path);    //彩色图暂时没有加载
-for(int i=0;i<n_cams_;i++)
-{
-    for(int j=0;j<depths_path[i].size();j++)
-        std::cout<<depths_path[i][j]<<std::ends;
-}
 
         /* output */
         create_output_directory();
